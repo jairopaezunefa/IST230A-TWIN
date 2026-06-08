@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Asset Twin Completo Corregido - VFD Delectra IST230A</title>
+    <style>
+        body {
+            background-color: #121216;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 { margin: 5px 0; font-size: 1.6rem; color: #ffffff; }
+        .subtitle { color: #8a8a93; margin-bottom: 20px; font-size: 0.85rem; }
+        #app-layout {
+            display: flex;
+            gap: 25px;
+            background: #1c1c24;
+            padding: 25px;
+            border-radius: 14px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+        }
+        #vfdCanvas {
+            background-color: #25252e;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+        .info-panel {
+            width: 340px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .status-card {
+            background: #23232f;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #00ff66;
+        }
+        .status-card h3 { margin: 0 0 10px 0; font-size: 0.95rem; color: #00ff66; text-transform: uppercase; }
+        .status-card p { margin: 6px 0; font-size: 0.85rem; display: flex; justify-content: space-between; }
+        .val-highlight { font-weight: bold; color: #ffffff; font-family: monospace; font-size: 0.95rem; }
+        
+        .range-box {
+            background: #181822;
+            border: 1px solid #3a3a4c;
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            color: #00ffaa;
+            max-height: 85px;
+            overflow-y: auto;
+            display: none;
+        }
+        .range-box::-webkit-scrollbar { width: 6px; }
+        .range-box::-webkit-scrollbar-track { background: #121216; }
+        .range-box::-webkit-scrollbar-thumb { background: #007acc; border-radius: 3px; }
+
+        .instructions { background: #23232f; padding: 15px; border-radius: 8px; border-left: 4px solid #00bfff; font-size: 0.8rem; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+    <h1>Gemelo Digital de Parámetros Real - Delectra IST230A</h1>
+    <div class="subtitle">INGJP / JS TELECOM</div>
+
+    <div id="app-layout">
+        <canvas id="vfdCanvas" width="340" height="520"></canvas>
+
+        <div class="info-panel">
+            <div class="status-card">
+                <h3>Monitoreo Dinámico del Motor</h3>
+                <p>Frecuencia de Salida: <span id="log-freq" class="val-highlight">0.00 Hz</span></p>
+                <p>Corriente del Motor: <span id="log-curr" class="val-highlight">0.00 A</span></p>
+                <p>Voltaje del Bus AC: <span id="log-volt" class="val-highlight">0 V</span></p>
+                <p>Velocidad de Rotación: <span id="log-rpm" class="val-highlight">0 RPM</span></p>
+            </div>
+
+            <div class="status-card" style="border-left-color: #ffaa00; padding-bottom: 12px;">
+                <h3>Estado de la Memoria Interna</h3>
+                <p>Modo de Interfaz: <span id="key-state" class="val-highlight" style="color:#00ff66;">TELEMETRIA</span></p>
+                <p>Parámetro Activo: <span id="p-code" class="val-highlight">Ninguno</span></p>
+                <p id="row-val">Valor Almacenado: <span id="p-val" class="val-highlight" style="color:#ffaa00;">-</span></p>
+                
+                <div id="p-range-box" class="range-box"></div>
+            </div>
+
+            <div class="instructions">
+                <strong>Orar en todo momento:</strong>
+                <ul>
+                    <li><strong>Ejemplo 1:</strong> San Mateo 6,9-13: Ustedes, pues, recen así: "Padre nuestro...</li>
+                    <li><strong>Ejemplo 2:</strong> San Lucas 11,2-4: Les dijo: "Cuando recen, digan: Padre...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * MAPA DE PARÁMETROS CORREGIDO SEGÚN MANUAL DEL VFD
+ * runEditable: true (Símbolo ☆ / Modificable en RUN y STOP)
+ * runEditable: false (Símbolo ★ / Solo modificable en STOP)
+ */
+const parameterMap = {
+    "P0": {
+        "01": { name: "Modo de control del motor", val: 2, min: 0, max: 2, decimals: 0, runEditable: false, range: "0: SFVC; 2: Control V/F" },
+        "02": { name: "Selección de la fuente de comando", val: 0, min: 0, max: 2, decimals: 0, runEditable: true, range: "0: Teclado; 1: Terminales; 2: Comunicación" },
+        "03": { name: "Selección de fuente de frecuencia principal X", val: 3, min: 0, max: 9, decimals: 0, runEditable: true, range: "0: Ajuste digital; 3: Potenciómetro local; 9: Comunicación" },
+        "04": { name: "Fuente de frecuencia auxiliar Y", val: 0, min: 0, max: 9, decimals: 0, runEditable: true, range: "Mismo rango que P0-03" },
+        "07": { name: "Selección de superposición de frecuencia", val: 0, min: 0, max: 33, decimals: 0, runEditable: true, range: "Configuración de combinación X e Y:Dígito de unidades: 0: X; 1: X e Y; 2: Alternar X/Y Dígito de decenas: 0: X+Y; 1: X-Y; 2: Máximo; 3:Mínimo" },
+        "08": { name: "Frecuencia preestablecida digital", val: 50.00, min: 0.00, max: 50.00, decimals: 2, runEditable: true, range: "0.00 Hz a Frecuencia Máxima (P0-10)" },
+        "09": { name: "Dirección de rotación", val: 0, min: 0, max: 1, decimals: 0, runEditable: true, range: "0: Dirección normal; 1: Dirección inversa" },
+        "10": { name: "Frecuencia máxima", val: 50.00, min: 50.00, max: 500.00, decimals: 2, runEditable: false, range: "50.00 Hz a 500.00 Hz" },
+        "11": { name: "Fuente del límite superior de frecuencia", val: 0, min: 0, max: 5, decimals: 0, runEditable: true, range: "0: P0-12; 1: AI1; 3: Potenciómetro" },
+        "12": { name: "Límite superior de frecuencia", val: 50.00, min: 0.00, max: 50.00, decimals: 2, runEditable: true, range: "Límite inferior a Frecuencia máxima" },
+        "14": { name: "Límite inferior de frecuencia", val: 0.00, min: 0.00, max: 50.00, decimals: 2, runEditable: true, range: "0.00 Hz a Límite superior" },
+        "15": { name: "Frecuencia portadora (Carrier)", val: 4.0, min: 2.0, max: 8.0, decimals: 1, runEditable: true, range: "2.0 kHz a 8.0 kHz" },
+        "17": { name: "Tiempo de aceleración 1", val: 10.0, min: 0.0, max: 6500.0, decimals: 1, runEditable: true, range: "0.0s a 6500.0s" },
+        "18": { name: "Tiempo de desaceleración 1", val: 10.0, min: 0.0, max: 6500.0, decimals: 1, runEditable: true, range: "0.0s a 6500.0s" },
+        "19": { name: "Unidad de tiempo de acel./desacel.", val: 1, min: 0, max: 2, decimals: 0, runEditable: false, range: "0: 1s; 1: 0.1s; 2: 0.01s" },
+        "23": { name: "Memoria de frecuencia digital en apagado", val: 0, min: 0, max: 1, decimals: 0, runEditable: true, range: "0: No retentiva; 1: Retentiva" }
+    },
+    "P1": {
+        "00": { name: "Selección del tipo de motor", val: 0, min: 0, max: 2, decimals: 0, runEditable: false, range: "0: Motor asíncrono común; 2: Motor síncrono" },
+        "01": { name: "Potencia nominal del motor", val: 0.75, min: 0.1, max: 1000.0, decimals: 2, runEditable: false, range: "0.1 kW a 1000.0 kW" },
+        "02": { name: "Voltaje nominal del motor", val: 220, min: 1, max: 2000, decimals: 0, runEditable: false, range: "1V a 2000V" },
+        "03": { name: "Corriente nominal del motor", val: 4.00, min: 0.01, max: 10.00, decimals: 2, runEditable: false, range: "0.01A a 10.00A" },
+        "04": { name: "Frecuencia nominal del motor", val: 50.00, min: 0.01, max: 500.00, decimals: 2, runEditable: false, range: "0.01 Hz a Frecuencia máxima" },
+        "05": { name: "Velocidad nominal de rotación", val: 1450, min: 1, max: 65535, decimals: 0, runEditable: false, range: "1 rpm a 65535 rpm" },
+        "37": { name: "Selección de Auto-tuning", val: 0, min: 0, max: 2, decimals: 0, runEditable: false, range: "0: Sin acción; 1: Estático; 2: Dinámico" }
+    },
+    "P2": {
+        "00": { name: "Ganancia proporcional lazo velocidad 1", val: 30, min: 1, max: 100, decimals: 0, runEditable: true, range: "Rango válido: 1 a 100" },
+        "01": { name: "Tiempo de integración lazo velocidad 1", val: 0.50, min: 0.01, max: 10.00, decimals: 2, runEditable: true, range: "0.01s a 10.00s" }
+    },
+    "P3": {
+        "00": { name: "Configuración de la curva V/F", val: 0, min: 0, max: 10, decimals: 0, runEditable: false, range: "0: Lineal; 1: Multipunto; 2: Cuadrática" },
+        "01": { name: "Compensación de torque (Torque Boost)", val: 2.0, min: 0.0, max: 30.0, decimals: 1, runEditable: true, range: "0.0%: Auto; 0.1% a 30.0%" }
+    },
+    "P4": {
+        "00": { name: "Función del terminal DI1", val: 1, min: 0, max: 9, decimals: 0, runEditable: false, range: "1: Marcha adelante (FWD); 2: Reversa (REV)" },
+        "11": { name: "Modo de comando por terminales", val: 0, min: 0, max: 2, decimals: 0, runEditable: false, range: "0: 2 hilos 1; 1: 2 hilos 2; 2: 3 hilos 1" }
+    },
+    "Pd": {
+        "00": { name: "Velocidad de comunicación (Baud rate)", val: 5, min: 0, max: 7, decimals: 0, runEditable: false, range: "5: 9600 bps; 6: 19200 bps; 7: 38400 bps" },
+        "01": { name: "Formato de datos Modbus", val: 3, min: 0, max: 3, decimals: 0, runEditable: false, range: "3: Sin paridad (8-N-1)" },
+        "02": { name: "Dirección local Modbus (ID esclavo)", val: 1, min: 1, max: 247, decimals: 0, runEditable: true, range: "Estaciones: 1 a 247" }
+    },
+    "U0": {
+        "00": { name: "Frecuencia de salida actual", val: 0.00, min: 0.00, max: 500.00, decimals: 2, readOnly: true, range: "Solo Lectura" },
+        "01": { name: "Corriente de salida actual", val: 0.00, min: 0.00, max: 100.00, decimals: 2, readOnly: true, range: "Solo Lectura" },
+        "02": { name: "Voltaje de salida actual", val: 0, min: 0, max: 440, decimals: 0, readOnly: true, range: "Solo Lectura" }
+    }
+};
+
+const groupKeys = Object.keys(parameterMap);
+let activeGroupIdx = 0;
+let activeCodeIdx = 0;
+
+const STATES = { TELEMETRIA: 0, GRUPO: 1, CODIGO: 2, VALOR: 3, END: 4, ERROR_RUN: 5 };
+let currentState = STATES.TELEMETRIA;
+
+let editValueStr = "000.00";
+let selectedDigitIdx = 0; 
+let flashEndTimer = 0;
+
+let vfd = {
+    isRunning: false,
+    targetFreq: 0.00,
+    currentFreq: 0.00,
+    currentAmps: 0.00,
+    currentVolts: 0,
+    currentRPM: 0,
+    potentiometer: 0.00, 
+    displayView: 0 
+};
+
+const canvas = document.getElementById('vfdCanvas');
+const ctx = canvas.getContext('2d');
+
+const potDial = { x: 65, y: 240, r: 24, angle: Math.PI * 0.8 };
+const sliderBar = { x: 34, y: 288, w: 272, h: 10, handleR: 8 };
+
+const uiButtons = [
+    { id: 'PROG',  x: 35,  y: 345, w: 55, h: 34, label: 'PROG', bg: '#4d4d5a', color: '#fff' },
+    { id: 'MFUN',  x: 105, y: 345, w: 55, h: 34, label: 'M-FUN', bg: '#4d4d5a', color: '#fff' },
+    { id: 'UP',    x: 180, y: 345, w: 52, h: 34, label: '▲', bg: '#3a3a42', color: '#00ff66' },
+    { id: 'DOWN',  x: 250, y: 345, w: 52, h: 34, label: '▼', bg: '#3a3a42', color: '#00ff66' },
+    { id: 'SHIFT', x: 35,  y: 400, w: 55, h: 34, label: '<', bg: '#4d4d5a', color: '#fff' },
+    { id: 'ENTER', x: 105, y: 400, w: 55, h: 34, label: 'ENTER', bg: '#4d4d5a', color: '#fff' },
+    { id: 'RUN',   x: 180, y: 400, w: 52, h: 44, label: 'RUN', bg: '#008a3b', color: '#fff' },
+    { id: 'STOP',  x: 250, y: 400, w: 52, h: 44, label: 'STOP', bg: '#d60024', color: '#fff' }
+];
+
+let globalBlink = true;
+setInterval(() => { globalBlink = !globalBlink; }, 250);
+
+let isDraggingPot = false;
+let isDraggingSlider = false;
+
+canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (mx >= sliderBar.x - 5 && mx <= sliderBar.x + sliderBar.w + 5 && my >= sliderBar.y - 10 && my <= sliderBar.y + 20) {
+        isDraggingSlider = true;
+        updateSliderFromX(mx);
+        return;
+    }
+
+    if (Math.hypot(mx - potDial.x, my - potDial.y) <= potDial.r + 5) {
+        isDraggingPot = true;
+        updateDialFromMouse(mx, my);
+        return;
+    }
+
+    uiButtons.forEach(b => {
+        const padding = 4; 
+        if (mx >= b.x - padding && mx <= b.x + b.w + padding && my >= b.y - padding && my <= b.y + b.h + padding) {
+            processVFDKey(b.id);
+        }
+    });
+});
+
+window.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (isDraggingSlider) updateSliderFromX(mx);
+    else if (isDraggingPot) updateDialFromMouse(mx, my);
+});
+
+window.addEventListener('mouseup', () => { 
+    isDraggingPot = false; 
+    isDraggingSlider = false; 
+});
+
+function updateSliderFromX(mx) {
+    let norm = (mx - sliderBar.x) / sliderBar.w;
+    vfd.potentiometer = Math.min(Math.max(norm, 0), 1);
+    syncPotentiometerToDial();
+}
+
+function updateDialFromMouse(mx, my) {
+    let angle = Math.atan2(my - potDial.y, mx - potDial.x);
+    if (angle > -Math.PI * 0.2 && angle < Math.PI * 0.5) angle = -Math.PI * 0.2;
+    if (angle > Math.PI * 0.5 && angle < Math.PI * 1.2) angle = Math.PI * 1.2;
+    potDial.angle = angle;
+
+    let norm = (angle - Math.PI * 1.2) / (2 * Math.PI - Math.PI * 1.4);
+    if (norm < 0) norm += 1;
+    vfd.potentiometer = Math.min(Math.max(norm, 0), 1);
+}
+
+function syncPotentiometerToDial() {
+    let range = (2 * Math.PI - Math.PI * 1.4);
+    let angle = Math.PI * 1.2 + (vfd.potentiometer * range);
+    if (angle > Math.PI) angle -= 2 * Math.PI;
+    potDial.angle = angle;
+}
+
+function processVFDKey(key) {
+    let currentGroup = groupKeys[activeGroupIdx];
+    let codes = Object.keys(parameterMap[currentGroup]);
+    
+    if (currentState === STATES.ERROR_RUN) {
+        currentState = STATES.CODIGO;
+        return;
+    }
+
+    switch(key) {
+        case 'PROG':
+            if (currentState === STATES.TELEMETRIA) currentState = STATES.GRUPO;
+            else if (currentState === STATES.GRUPO) currentState = STATES.TELEMETRIA;
+            else if (currentState === STATES.CODIGO) currentState = STATES.GRUPO;
+            else if (currentState === STATES.VALOR) currentState = STATES.CODIGO;
+            break;
+
+        case 'ENTER':
+            if (currentState === STATES.GRUPO) {
+                activeCodeIdx = 0; 
+                currentState = STATES.CODIGO;
+            } else if (currentState === STATES.CODIGO) {
+                let pObj = parameterMap[currentGroup][codes[activeCodeIdx]];
+                
+                // VALIDACIÓN REAL DE MANUAL: Bloquear si runEditable es false Y el motor está en marcha
+                if (vfd.isRunning && pObj.runEditable === false) {
+                    currentState = STATES.ERROR_RUN;
+                    flashEndTimer = 35; 
+                    break;
+                }
+
+                editValueStr = pObj.val.toFixed(pObj.decimals);
+                selectedDigitIdx = editValueStr.length - 1;
+                currentState = STATES.VALOR;
+            } else if (currentState === STATES.VALOR) {
+                let pObj = parameterMap[currentGroup][codes[activeCodeIdx]];
+                if (!pObj.readOnly) {
+                    let parsed = parseFloat(editValueStr);
+                    if (!isNaN(parsed) && parsed >= pObj.min && parsed <= pObj.max) {
+                        pObj.val = parsed;
+                        
+                        // =====================INGJP===================================
+						if (currentGroup === "P0" && codes[activeCodeIdx] === "09") {
+							//if (pActive.val === "1" || pActive.val === 1) {
+							if (pObj.val === 1) {
+								vfd.isReverse = true;          // Indica a la simulación que el giro es inverso
+								if(vfd.dir) vfd.dir = -1;      // Si tu motor usa un multiplicador de dirección
+							} else {
+								vfd.isReverse = false;         // Giro hacia adelante (Forward)
+								if(vfd.dir) vfd.dir = 1;
+							}
+						}
+						// ========================================================
+						else if (currentGroup === "P0" && codes[activeCodeIdx] === "10") {
+                            parameterMap["P0"]["08"].max = parsed;
+                            parameterMap["P0"]["12"].max = parsed;
+                            parameterMap["P0"]["14"].max = parsed;
+                        }
+                    }
+                }
+                currentState = STATES.END;
+                flashEndTimer = 20; 
+            }
+            break;
+
+        case 'SHIFT':
+            if (currentState === STATES.TELEMETRIA) {
+                vfd.displayView = (vfd.displayView + 1) % 4; 
+            } else if (currentState === STATES.VALOR) {
+                selectedDigitIdx--;
+                if (selectedDigitIdx < 0) selectedDigitIdx = editValueStr.length - 1;
+                if (editValueStr[selectedDigitIdx] === '.') selectedDigitIdx--;
+            }
+            break;
+
+        case 'UP':
+            if (currentState === STATES.GRUPO) {
+                activeGroupIdx = (activeGroupIdx + 1) % groupKeys.length;
+            } else if (currentState === STATES.CODIGO) {
+                activeCodeIdx = (activeCodeIdx + 1) % codes.length;
+            } else if (currentState === STATES.VALOR) {
+                modifyActiveDigit(1);
+            }
+            break;
+
+        case 'DOWN':
+            if (currentState === STATES.GRUPO) {
+                activeGroupIdx = (activeGroupIdx - 1 + groupKeys.length) % groupKeys.length;
+            } else if (currentState === STATES.CODIGO) {
+                activeCodeIdx = (activeCodeIdx - 1 + codes.length) % codes.length;
+            } else if (currentState === STATES.VALOR) {
+                modifyActiveDigit(-1);
+            }
+            break;
+
+        case 'RUN':
+            if (parameterMap["P0"]["02"].val === 0) vfd.isRunning = true;
+            break;
+
+        case 'STOP':
+            vfd.isRunning = false;
+            break;
+    }
+    updateHTMLTelemetry();
+}
+
+function modifyActiveDigit(direction) {
+    let arr = editValueStr.split('');
+    let char = arr[selectedDigitIdx];
+    let num = parseInt(char);
+    if (!isNaN(num)) {
+        num = (num + direction + 10) % 10;
+        arr[selectedDigitIdx] = num.toString();
+        editValueStr = arr.join('');
+    }
+}
+
+
+function ORIGrunPhysicsEngine() {
+    let maxF = parameterMap["P0"]["10"].val;
+    let freqSource = parameterMap["P0"]["03"].val;
+
+    if (freqSource === 3) {
+        vfd.targetFreq = vfd.potentiometer * maxF;
+    } else {
+        vfd.targetFreq = Math.min(parameterMap["P0"]["08"].val, maxF);
+    }
+
+    let accTime = parameterMap["P0"]["17"].val;
+    let decTime = parameterMap["P0"]["18"].val;
+    let deltaAcc = maxF / (accTime * 60);
+    let deltaDec = maxF / (decTime * 60);
+
+    if (vfd.isRunning) {
+        if (vfd.currentFreq < vfd.targetFreq) vfd.currentFreq = Math.min(vfd.targetFreq, vfd.currentFreq + deltaAcc);
+        else if (vfd.currentFreq > vfd.targetFreq) vfd.currentFreq = Math.max(vfd.targetFreq, vfd.currentFreq - deltaDec);
+    } else {
+        if (vfd.currentFreq > 0) vfd.currentFreq = Math.max(0, vfd.currentFreq - deltaDec);
+    }
+
+    if (vfd.currentFreq > 0.05) {
+        let nominalAmps = parameterMap["P1"]["03"].val;
+        vfd.currentAmps = (vfd.currentFreq / maxF) * nominalAmps * (0.88 + Math.random() * 0.04);
+        vfd.currentVolts = Math.round((vfd.currentFreq / maxF) * parameterMap["P1"]["02"].val);
+        
+        let nominalRPM = parameterMap["P1"]["05"].val;
+        let nominalFreq = parameterMap["P1"]["04"].val;
+        vfd.currentRPM = Math.round((vfd.currentFreq / nominalFreq) * nominalRPM);
+    } else {
+        vfd.currentAmps = 0; vfd.currentVolts = 0; vfd.currentRPM = 0;
+    }
+
+    parameterMap["U0"]["00"].val = vfd.currentFreq;
+    parameterMap["U0"]["01"].val = vfd.currentAmps;
+    parameterMap["U0"]["02"].val = vfd.currentVolts;
+}
+
+function runPhysicsEngine() {
+    let maxF = parameterMap["P0"]["10"].val;
+    let freqSource = parameterMap["P0"]["03"].val;
+
+    // 1. Determinar la magnitud de la frecuencia objetivo (Siempre positiva)
+    let baseTargetFreq = 0;
+    if (freqSource === 3) {
+        baseTargetFreq = vfd.potentiometer * maxF;
+    } else {
+        baseTargetFreq = Math.min(parameterMap["P0"]["08"].val, maxF);
+    }
+
+    // 2. Aplicar el sentido de giro multiplicando por -1 si P0-09 es igual a 1 (Reversa)
+    let direccion = (parameterMap["P0"]["09"].val === "1" || parameterMap["P0"]["09"].val === 1) ? -1 : 1;
+    let signedTargetFreq = baseTargetFreq * direccion;
+
+    let accTime = parameterMap["P0"]["17"].val;
+    let decTime = parameterMap["P0"]["18"].val;
+    let deltaAcc = maxF / (accTime * 60);
+    let deltaDec = maxF / (decTime * 60);
+
+    // 3. Lógica de Rampas adaptada a valores con signo (+ o -)
+    if (vfd.isRunning) {
+        if (vfd.currentFreq < signedTargetFreq) {
+            // Si va hacia arriba (acelerando en avance o desacelerando en reversa hacia el cero)
+            // Evaluamos si cruza el cero para saber si aplica rampa de aceleración o desaceleración técnica
+            let step = (vfd.currentFreq < 0 && signedTargetFreq <= 0) ? deltaAcc : deltaAcc; 
+            vfd.currentFreq = Math.min(signedTargetFreq, vfd.currentFreq + step);
+        } 
+        else if (vfd.currentFreq > signedTargetFreq) {
+            // Si va hacia abajo (desacelerando en avance o acelerando en reversa)
+            vfd.currentFreq = Math.max(signedTargetFreq, vfd.currentFreq - deltaDec);
+        }
+    } else {
+        // Al detenerse, busca de forma progresiva el 0 desde cualquier sentido (+ o -)
+        if (vfd.currentFreq > 0) {
+            vfd.currentFreq = Math.max(0, vfd.currentFreq - deltaDec);
+        } else if (vfd.currentFreq < 0) {
+            vfd.currentFreq = Math.min(0, vfd.currentFreq + deltaDec);
+        }
+    }
+
+    // 4. Telemetría y Cálculos basados en el Valor Absoluto (Magnitud física real)
+    let absFreq = Math.abs(vfd.currentFreq);
+
+    if (absFreq > 0.05) {
+        let nominalAmps = parameterMap["P1"]["03"].val;
+        vfd.currentAmps = (absFreq / maxF) * nominalAmps * (0.88 + Math.random() * 0.04);
+        vfd.currentVolts = Math.round((absFreq / maxF) * parameterMap["P1"]["02"].val);
+        
+        let nominalRPM = parameterMap["P1"]["05"].val;
+        let nominalFreq = parameterMap["P1"]["04"].val;
+        vfd.currentRPM = Math.round((absFreq / nominalFreq) * nominalRPM);
+    } else {
+        vfd.currentAmps = 0; vfd.currentVolts = 0; vfd.currentRPM = 0;
+    }
+
+    // 5. Mapeo de variables de usuario (Siempre positivos para la lectura del display)
+    parameterMap["U0"]["00"].val = absFreq;
+    parameterMap["U0"]["01"].val = vfd.currentAmps;
+    parameterMap["U0"]["02"].val = vfd.currentVolts;
+}
+
+function drawVFDGraphics() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#282830';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#15151a';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, canvas.width-6, canvas.height-6);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px Arial';
+    ctx.fillText('Delectra', 30, 38);
+    ctx.fillStyle = '#00ffaa';
+    ctx.font = '11px Courier New';
+    ctx.fillText('IST230A Real Twin', 150, 36);
+
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(22, 60, 296, 85);
+
+    renderLed(40, 75, vfd.isRunning, 'RUN');
+    renderLed(95, 75, parameterMap["P0"]["02"].val !== 0, 'LOCAL');
+    // INGJP renderLed(155, 75, true, 'F/R');
+	//renderLed(155, 75, parameterMap["P0"]["09"].val === 1, 'F/R');
+	renderLed(155, 75, parameterMap["P0"]["09"].val === 1, 'F/R');
+    renderLed(280, 75, vfd.displayView === 0, 'Hz');
+    renderLed(280, 98, vfd.displayView === 1, 'A');
+    renderLed(280, 122, vfd.displayView === 2 || vfd.displayView === 3, 'V/RPM');
+
+    let dispStr = "----";
+    ctx.font = 'bold 34px "Courier New"';
+
+    if (currentState === STATES.TELEMETRIA) {
+        if (vfd.displayView === 0) dispStr = Math.abs(vfd.currentFreq).toFixed(2);
+        if (vfd.displayView === 1) dispStr = vfd.currentAmps.toFixed(2);
+        if (vfd.displayView === 2) dispStr = vfd.currentVolts.toString();
+        if (vfd.displayView === 3) dispStr = vfd.currentRPM.toString();
+        
+        ctx.fillStyle = '#ff2222';
+        ctx.textAlign = "right";
+        ctx.fillText(dispStr, 260, 122);
+    } 
+    else if (currentState === STATES.GRUPO) {
+        dispStr = groupKeys[activeGroupIdx]; 
+        ctx.fillStyle = '#ff2222';
+        ctx.textAlign = "right";
+        ctx.fillText(dispStr, 260, 122);
+    } 
+    else if (currentState === STATES.CODIGO) {
+        let codes = Object.keys(parameterMap[groupKeys[activeGroupIdx]]);
+        dispStr = groupKeys[activeGroupIdx] + "-" + codes[activeCodeIdx]; 
+        ctx.fillStyle = '#ff2222';
+        ctx.textAlign = "right";
+        ctx.fillText(dispStr, 260, 122);
+    } 
+    else if (currentState === STATES.END) {
+        dispStr = "-END-";
+        ctx.fillStyle = '#00ff66';
+        ctx.textAlign = "right";
+        ctx.fillText(dispStr, 260, 122);
+    }
+    else if (currentState === STATES.ERROR_RUN) {
+        dispStr = "u-Pr";
+        ctx.fillStyle = '#ff3300';
+        ctx.textAlign = "right";
+        ctx.fillText(dispStr, 260, 122);
+    }
+    else if (currentState === STATES.VALOR) {
+        let startX = 110; 
+        ctx.textAlign = "left";
+        for (let i = 0; i < editValueStr.length; i++) {
+            if (i === selectedDigitIdx && !globalBlink) {
+                startX += 22;
+                continue;
+            }
+            ctx.fillStyle = '#ff2222';
+            ctx.fillText(editValueStr[i], startX, 122);
+            startX += 22;
+        }
+    }
+    ctx.textAlign = "left"; 
+
+    ctx.save();
+    ctx.translate(potDial.x, potDial.y);
+    ctx.beginPath(); ctx.arc(0, 0, potDial.r, 0, 2*Math.PI);
+    ctx.fillStyle = '#18181f'; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, potDial.r - 4, 0, 2*Math.PI);
+    ctx.fillStyle = '#50505a'; ctx.fill(); ctx.stroke();
+    ctx.rotate(potDial.angle);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(potDial.r - 5, 0);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
+    
+    ctx.fillStyle = '#8e8e98'; ctx.font = 'bold 9px Arial';
+    ctx.fillText('DIAL', potDial.x - 11, potDial.y + 36);
+
+    ctx.fillStyle = '#15151a';
+    ctx.fillRect(sliderBar.x, sliderBar.y, sliderBar.w, sliderBar.h);
+    ctx.strokeStyle = '#3a3a45';
+    ctx.strokeRect(sliderBar.x, sliderBar.y, sliderBar.w, sliderBar.h);
+
+    ctx.fillStyle = '#007acc';
+    ctx.fillRect(sliderBar.x, sliderBar.y, vfd.potentiometer * sliderBar.w, sliderBar.h);
+
+    let handleX = sliderBar.x + (vfd.potentiometer * sliderBar.w);
+    ctx.beginPath();
+    ctx.arc(handleX, sliderBar.y + sliderBar.h/2, sliderBar.handleR, 0, 2*Math.PI);
+    ctx.fillStyle = '#00bfff';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+
+    ctx.fillStyle = '#8e8e98'; ctx.font = 'bold 9px Arial';
+    ctx.fillText('                      DESLIZADOR DE FRECUENCIA', sliderBar.x + 15, sliderBar.y - 6);
+
+    uiButtons.forEach(b => {
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+        ctx.fillStyle = b.bg; 
+        ctx.fillRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2);
+
+        ctx.fillStyle = b.color; 
+        ctx.font = 'bold 11px Arial'; 
+        ctx.textAlign = "center";
+        ctx.fillText(b.label, b.x + b.w/2, b.y + b.h/2 + 4);
+    });
+    ctx.textAlign = "left";
+}
+
+function renderLed(x, y, active, txt) {
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI);
+    ctx.fillStyle = active ? '#00ff55' : '#300005'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.stroke();
+    ctx.fillStyle = '#90909a'; ctx.font = '8px Helvetica';
+    ctx.fillText(txt, x + 10, y + 3);
+}
+
+function updateHTMLTelemetry() {
+    document.getElementById('log-freq').innerText = vfd.currentFreq.toFixed(2) + " Hz"; / Pudiese agregar Math.abs()
+    document.getElementById('log-curr').innerText = vfd.currentAmps.toFixed(2) + " A";
+    document.getElementById('log-volt').innerText = vfd.currentVolts + " V";
+    document.getElementById('log-rpm').innerText = vfd.currentRPM + " RPM";
+
+    const modesTxt = ["TELEMETRIA", "SELECCION GRUPO", "SELECCION CODIGO", "EDICION VALOR", "GUARDANDO", "ERROR: ADVERTENCIA EN RUN"];
+    document.getElementById('key-state').innerText = modesTxt[currentState];
+
+    const currentGroup = groupKeys[activeGroupIdx];
+    const codes = Object.keys(parameterMap[currentGroup]);
+    const pActive = parameterMap[currentGroup][codes[activeCodeIdx]];
+
+    const rangeBox = document.getElementById('p-range-box');
+    const rowVal = document.getElementById('row-val');
+
+    if (currentState === STATES.ERROR_RUN) {
+        rangeBox.innerHTML = `<span style="color: #ff3300; font-weight: bold;">[BLOQUEO TÉCNICO]</span><br>El parámetro <strong>${pActive.name}</strong> tiene el símbolo ★ en manual. Exige detener el motor para ser alterado.`;
+        rangeBox.style.display = "block";
+        rowVal.style.display = "none";
+        return;
+    }
+
+    if (currentState >= STATES.GRUPO && currentState <= STATES.VALOR) {
+        document.getElementById('p-code').innerText = `${currentGroup}-${codes[activeCodeIdx]}`;
+        
+        if(currentState === STATES.VALOR){
+            rowVal.style.display = "flex";
+            document.getElementById('p-val').innerText = pActive.val;
+        } else {
+            rowVal.style.display = "none";
+        }
+        
+        if(pActive) {
+            let pName = pActive.name || "Parámetro Desconocido";
+            let pRange = pActive.range || "Sin opciones.";
+            let lockIcon = pActive.runEditable ? "☆ Permite Marcha" : "★ Bloqueado en RUN";
+            rangeBox.innerHTML = `<strong>${pName}</strong> [${lockIcon}]:<br>${pRange}`;
+            rangeBox.style.display = "block";
+        }
+    } else {
+        document.getElementById('p-code').innerText = "Ninguno";
+        rowVal.style.display = "flex";
+        document.getElementById('p-val').innerText = "-";
+        rangeBox.style.display = "none"; 
+    }
+}
+
+function masterLoop() {
+    runPhysicsEngine();
+    if (currentState === STATES.END || currentState === STATES.ERROR_RUN) {
+        flashEndTimer--;
+        if (flashEndTimer <= 0) currentState = STATES.CODIGO;
+    }
+    drawVFDGraphics();
+    masterLoopCounter++;
+    if (masterLoopCounter % 10 === 0) updateHTMLTelemetry(); 
+    requestAnimationFrame(masterLoop);
+}
+
+let masterLoopCounter = 0;
+masterLoop();
+</script>
+
+</body>
+</html>
